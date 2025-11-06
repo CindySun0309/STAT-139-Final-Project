@@ -1,0 +1,289 @@
+---
+title: "EDA"
+author: "Cindy Sun, Cathy Liu, Jenny Zhu"
+date: "2025-10-31"
+output: 
+  pdf_document:
+  latex_engine: xelatex
+---
+
+```{r, message=FALSE,warning=FALSE}
+library(tidyverse)
+library(readr)
+library(readxl)
+library(snakecase)
+```
+
+#### DATA IMPORT/WRANGLING
+```{r, message=FALSE,warning=FALSE}
+# reading the csv:
+SchoolQualityReport <- read_csv("2017-2018_School_Quality_Report_-_High_School_20240807.csv")
+RegentsExams <- read_excel("2014-15-to-2018-19-nyc-regents-overall-and-by-category---public.xlsx")
+
+colnames(SchoolQualityReport) <- to_snake_case(colnames(SchoolQualityReport))
+colnames(RegentsExams) <- to_snake_case(colnames(RegentsExams))
+
+
+# selecting the relevant variables from this data set.
+SchoolQuality_Selected <- SchoolQualityReport |>
+  select(dbn, school_name, percent_of_teachers_with_3_or_more_years_of_experience, percent_of_students_chronically_absent, rigorous_instruction_percent_positive, supportive_environment_percent_positive, economic_need_index)
+
+# changing one column name to make it easier to left join later
+colnames(SchoolQuality_Selected)[1] <- c("school_dbn")
+
+
+# filtering the RegentsExams data set 
+RegentsEdited <- RegentsExams |> 
+  select(2:10) |>
+  filter(school_level == "High school", year == "2018", school_type == "General Academic")
+
+# filtering for only the two tests we are interested in
+RegentsEdited <- RegentsEdited |> 
+  filter(regents_exam == "Common Core Algebra2" | regents_exam == "Common Core English")
+
+# creating two new rows, one for the english scores one for the math scores
+RegentsEdited <- RegentsEdited |> 
+  pivot_wider(names_from = regents_exam,
+              values_from = mean_score)
+
+# changing the names to work for programming: 
+colnames(RegentsEdited)[8:9] <- c("mean_algebra2", "mean_english")
+
+
+# creating a data frame that only contains Algebra2 observations
+Algebra2 <- RegentsEdited |> 
+  select(!9) |>
+  filter(mean_algebra2 != "s" & !is.na(mean_algebra2))
+
+English <- RegentsEdited |> 
+  select(school_dbn, mean_english) |>
+  filter(mean_english != "s" & !is.na(mean_english))
+
+# joining the math and english exam data sets into final one 
+FinalRegents <- left_join(x = Algebra2, y = English, by = "school_dbn")
+
+
+# selecting only the minimum columns we are interested in
+Scores <- FinalRegents |> 
+  select(school_dbn, mean_algebra2, mean_english)
+
+# left joining by School.DBN to get the final data frame we want to work with: 
+joint_data <- left_join(x = Scores, y = SchoolQuality_Selected, by = "school_dbn")
+
+# The test score columns were character vectors so we needed to coerce them to numeric vectors.
+joint_data$mean_algebra2 <- as.numeric(joint_data$mean_algebra2)
+joint_data$mean_english <- as.numeric(joint_data$mean_english)
+
+
+# final data set is called joint_data
+```
+
+
+
+```{r, message=FALSE,warning=FALSE}
+# Check missing data
+sum(is.na(joint_data))
+colSums(is.na(joint_data))
+
+# Filter the data to fit predictions for math and english
+cleaned_data <- joint_data |>
+  dplyr::filter(
+    !is.na(percent_of_teachers_with_3_or_more_years_of_experience),
+    !is.na(percent_of_students_chronically_absent)
+  )
+
+# Save data in as cleaned_data
+write.csv(cleaned_data, "cleaned_data.csv", row.names = FALSE)
+```
+
+
+```{r, message=FALSE,warning=FALSE}
+# Summary mean_algebra2
+# Graphical
+hist(cleaned_data$mean_algebra2,
+main = "Histogram of Algebra2 Mean", 
+xlab = "Algebra2 Mean Score",
+ylab = "Count",
+col = "orange")
+
+# Numerical
+summary(cleaned_data$mean_algebra2)
+```
+
+```{r, message=FALSE,warning=FALSE}
+# Summary mean_english
+# Graphical
+hist(cleaned_data$mean_english,
+main = "Histogram of English Mean", 
+xlab = "English Mean Score",
+ylab = "Count",
+col = "lightgrey")
+
+# Numerical
+summary(cleaned_data$mean_english)
+```
+
+```{r, message=FALSE,warning=FALSE}
+# Summary percent_of_teachers_with_3_or_more_years_of_experience
+# Graphical
+hist(cleaned_data$percent_of_teachers_with_3_or_more_years_of_experience,
+main = "Histogram of Teacher Experience", 
+xlab = "Teacher Experience",
+ylab = "Count",
+col = "lightyellow")
+
+# Numerical
+summary(cleaned_data$percent_of_teachers_with_3_or_more_years_of_experience)
+```
+
+```{r, message=FALSE,warning=FALSE}
+# Summary percent_of_students_chronically_absent
+# Graphical
+hist(cleaned_data$percent_of_students_chronically_absent,
+main = "Histogram of Chronically Absent", 
+xlab = "Chronically Absent",
+ylab = "Count",
+col = "lightpink")
+
+# Numerical
+summary(cleaned_data$percent_of_students_chronically_absent)
+```
+
+```{r, message=FALSE,warning=FALSE}
+# Summary rigorous_instruction_percent_positive
+# Graphical
+hist(cleaned_data$rigorous_instruction_percent_positive,
+main = "Histogram of Rigorous Instruction", 
+xlab = "Rigorous Instruction",
+ylab = "Count",
+col = "lightblue")
+
+# Numerical
+summary(cleaned_data$rigorous_instruction_percent_positive)
+```
+
+```{r, message=FALSE,warning=FALSE}
+# Summary supportive_environment_percent_positive
+table(cleaned_data$supportive_environment_percent_positive)
+barplot(table(cleaned_data$supportive_environment_percent_positive),
+        main = "Supportive Environment Ratings",
+        xlab = "Rating",
+        ylab = "Frequency",
+        col = "lightgreen")
+```
+
+
+```{r, message=FALSE,warning=FALSE}
+# Summary economic_need_index
+# Graphical
+hist(cleaned_data$economic_need_index,
+main = "Histogram of Economic Need", xlab = "Economic Need",
+ylab = "Count")
+# Numerical
+summary(cleaned_data$economic_need_index)
+```
+
+
+
+# start
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+# --- Quick schema + completeness snapshot on your joined data frame (joint_data) ---
+skimr::skim(joint_data)
+
+# Visualize types & missingness
+visdat::vis_dat(joint_data, warn_large_data = FALSE)
+naniar::vis_miss(joint_data)
+```
+
+# end
+
+
+
+```{r}
+# --- Numeric columns: distributions ---
+num_cols <- names(joint_data)[sapply(joint_data, is.numeric)]
+if (length(num_cols) > 0) {
+  DataExplorer::plot_histogram(joint_data[num_cols], nrow = ceiling(length(num_cols)/3))
+  DataExplorer::plot_density(joint_data[num_cols], nrow = ceiling(length(num_cols)/3))
+}
+```
+
+
+
+
+```{r fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
+# --- Correlation matrix + heatmap (numeric only; pairwise-complete) ---
+
+num_cols <- names(joint_data)[sapply(joint_data, is.numeric)]
+num_df <- joint_data[, num_cols, drop = FALSE]
+num_df <- num_df[, sapply(num_df, function(x) !all(is.na(x))), drop = FALSE]
+
+if (ncol(num_df) >= 2) {
+  cor_mat <- cor(num_df, use = "pairwise.complete.obs")
+  
+  cor_long <- as.data.frame(as.table(cor_mat))
+  names(cor_long) <- c("x", "y", "r")
+  
+  library(ggplot2)
+  
+  ggplot(cor_long, aes(x, y, fill = r)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = sprintf("%.2f", r)), 
+              color = "black", size = 4) +
+    scale_fill_gradient2(
+      low = "#5DADE2", mid = "white", high = "#EC7063",
+      midpoint = 0, limit = c(-1, 1), space = "Lab",
+      name = "Correlation"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+      axis.text.y = element_text(size = 12),
+      panel.grid = element_blank(),
+      axis.title = element_blank(),
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      legend.position = "right"
+    ) +
+    labs(title = "Correlation Heatmap (Numeric Variables)")
+}
+```
+
+
+
+```{r}
+# --- Outlier scan (|z| > 3) across numeric columns ---
+if (ncol(num_df) > 0) {
+  z_df <- as.data.frame(scale(num_df))
+  outlier_count <- sapply(z_df, function(x) sum(abs(x) > 3, na.rm = TRUE))
+  outlier_tbl <- tibble::tibble(variable = names(outlier_count),
+                                n_outliers = as.integer(outlier_count)) |>
+    dplyr::arrange(dplyr::desc(n_outliers))
+  print(head(outlier_tbl, 15))
+}
+```
+
+
+
+```{r}
+# --- Categorical profiling: top levels & shares (first 5 categorical cols) ---
+cat_cols <- names(joint_data)[sapply(joint_data, function(x) is.character(x) || is.factor(x))]
+for (c in head(cat_cols, 5)) {
+  tab <- joint_data |>
+    dplyr::count(.data[[c]], sort = TRUE, name = "n") |>
+    dplyr::mutate(pct = scales::percent(n / sum(n)))
+  print(glue::glue("Top levels for {c}:"))
+  print(head(tab, 15))
+}
+```
+
+
+
+```{r}
+# Simple boxplots for numeric columns
+numeric_cols <- names(joint_data)[sapply(joint_data, is.numeric)]
+for (col in head(numeric_cols, 5)) {
+  boxplot(joint_data[[col]], main = paste("Boxplot of", col), col = "skyblue")
+}
+
+```
