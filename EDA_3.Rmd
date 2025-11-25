@@ -124,7 +124,7 @@ joint_data$mean_english <- as.numeric(joint_data$mean_english)
 # final data set is called joint_data
 ```
 
-### Missing Data
+
 
 ```{r, echo=FALSE, message=FALSE,warning=FALSE}
 # Check missing data
