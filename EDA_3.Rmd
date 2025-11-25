@@ -1,0 +1,362 @@
+---
+title: "Investigating the Relationship Between NYC High School Quality and Test Scores in 2018"
+author: "Cindy Sun, Cathy Liu, Jenny Zhu"
+date: "2025-11-24"
+fontsize: 11pt
+geometry: margin=1in
+output:
+  pdf_document:
+    latex_engine: xelatex
+fig_width: 5
+fig_height: 3.5
+urlcolor: blue
+header-includes:
+  - \usepackage{amsmath}
+  - \DeclareMathOperator{\Cov}{Cov}
+  - \DeclareMathOperator{\Var}{Var} 
+  - \DeclareMathOperator{\Corr}{Corr}
+---
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(readr)
+library(readxl)
+library(snakecase)
+library(dplyr)
+```
+
+# 1. Data Description and Sources
+
+Our analysis draws on two publicly accessible datasets from NYC OpenData: the \textit{2017--2018 School Quality Reports} and the \textit{2018 Regents Exam Results}. NYC OpenData is a free public data maintained by the NYC Office of Technology and Innovation and sourced directly from city agencies. Each observation in our merged dataset corresponds to a unique New York City high school in 2018. After cleaning and merging, the final analytical dataset contains 224 high schools.
+
+## Regents Exam Data
+
+The Regents dataset (2015--2019) provides standardized test performance for all public schools in New York City. Following our project scope, we filtered this dataset to include only:
+\begin{itemize}
+    \item high schools
+    \item the 2018 exam year
+    \item schools classified as ``General Academic``
+    \item two examinations of interest: \textit{Common Core Algebra II} and \textit{Common Core English}
+\end{itemize}
+
+We reshaped the data so that each school has two numeric outcome variables: \texttt{mean\_algebra2} and \texttt{mean\_english}, representing the average Regents score earned by students in 2018. Suppressed exam values (recorded as ``s``) and missing scores were removed to ensure analytical accuracy.
+
+## School Quality Report Data
+
+The School Quality Reports (2017--2018) provide school-level indicators describing staffing, climate, learning environment, and student demographics. From this dataset, we selected five predictors aligned with our substantive interest in how school quality and disadvantage relate to academic performance:
+\begin{itemize}
+    \item \texttt{percent\_of\_teachers\_with\_3\_or\_more\_years\_of\_experience} : The percentage of teachers at the school who have at least three years of full-time teaching experience.
+    \item \texttt{percent\_of\_students\_chronically\_absent} : The percentage of students who were absent for 10% or more of the school year.
+    \item \texttt{rigorous\_instruction\_percent\_positive}: The percentage of students who responded positively on surveys measuring the rigor and challenge of classroom instruction.
+    \item \texttt{supportive\_environment\_percent\_positive}: The percentage of students who rated their school environment positively on aspects such as safety, respect, and emotional support.
+    \item \texttt{economic\_need\_index}: A composite index created by the NYC Department of Education that measures the economic disadvantage of a school’s student body, based on factors such as income eligibility for public assistance and free/reduced-price lunch.
+\end{itemize}
+
+To ensure consistency across the merged dataset, all variable names were converted to \texttt{snake\_case}. We did not include any quality-related categorical variables because more than 20% of their observations are missing in the dataset. The merging was performed by matching each school’s unique identifier, the District Borough Number (DBN).
+
+## Final Analytical Dataset
+
+After merging the Regents and School Quality datasets and removing schools with missing outcome values, the resulting dataset contains 224 NYC high schools. This dataset includes two outcome variables (Algebra II and English Regents performance) and several school-level predictors capturing teacher experience, attendance, instructional climate, school environment, and economic need. These variables provide a comprehensive foundation for modeling the relationship between school context and student academic achievement.
+
+
+
+# 2. EDA and Data Visualization
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# reading the csv:
+SchoolQualityReport <- read_csv("2017-2018_School_Quality_Report_-_High_School_20240807.csv")
+RegentsExams <- read_excel("2014-15-to-2018-19-nyc-regents-overall-and-by-category---public.xlsx")
+
+colnames(SchoolQualityReport) <- to_snake_case(colnames(SchoolQualityReport))
+colnames(RegentsExams) <- to_snake_case(colnames(RegentsExams))
+
+
+# selecting the relevant variables from this data set.
+SchoolQuality_Selected <- SchoolQualityReport |>
+  dplyr::select(dbn, school_name, percent_of_teachers_with_3_or_more_years_of_experience, percent_of_students_chronically_absent, rigorous_instruction_percent_positive, supportive_environment_percent_positive, economic_need_index)
+
+# changing one column name to make it easier to left join later
+colnames(SchoolQuality_Selected)[1] <- c("school_dbn")
+
+
+# filtering the RegentsExams data set 
+RegentsEdited <- RegentsExams |> 
+  dplyr::select(2:10) |>
+  filter(school_level == "High school", year == "2018", school_type == "General Academic")
+
+# filtering for only the two tests we are interested in
+RegentsEdited <- RegentsEdited |> 
+  filter(regents_exam == "Common Core Algebra2" | regents_exam == "Common Core English")
+
+# creating two new rows, one for the english scores one for the math scores
+RegentsEdited <- RegentsEdited |> 
+  pivot_wider(names_from = regents_exam,
+              values_from = mean_score)
+
+# changing the names to work for programming: 
+colnames(RegentsEdited)[8:9] <- c("mean_algebra2", "mean_english")
+
+
+# creating a data frame that only contains Algebra2 observations
+Algebra2 <- RegentsEdited |> 
+  dplyr::select(!9) |>
+  filter(mean_algebra2 != "s" & !is.na(mean_algebra2))
+
+English <- RegentsEdited |> 
+  dplyr::select(school_dbn, mean_english) |>
+  filter(mean_english != "s" & !is.na(mean_english))
+
+# joining the math and english exam data sets into final one 
+FinalRegents <- left_join(x = Algebra2, y = English, by = "school_dbn")
+
+
+# selecting only the minimum columns we are interested in
+Scores <- FinalRegents |> 
+  dplyr::select(school_dbn, mean_algebra2, mean_english)
+
+# left joining by School.DBN to get the final data frame we want to work with: 
+joint_data <- left_join(x = Scores, y = SchoolQuality_Selected, by = "school_dbn")
+
+# The test score columns were character vectors so we needed to coerce them to numeric vectors.
+joint_data$mean_algebra2 <- as.numeric(joint_data$mean_algebra2)
+joint_data$mean_english <- as.numeric(joint_data$mean_english)
+
+
+# final data set is called joint_data
+```
+
+### Missing Data
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# Check missing data
+#sum(is.na(joint_data))
+#colSums(is.na(joint_data))
+
+# Filter the data to fit predictions for math and english
+cleaned_data <- joint_data |>
+  dplyr::filter(
+    !is.na(percent_of_teachers_with_3_or_more_years_of_experience),
+    !is.na(percent_of_students_chronically_absent)
+  )
+
+
+#colSums(is.na(cleaned_data))
+```
+
+
+
+
+
+
+### Predictors
+
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+par(mfrow = c(2, 3))
+
+vars  <- c(
+  "percent_of_teachers_with_3_or_more_years_of_experience",
+  "percent_of_students_chronically_absent",
+  "rigorous_instruction_percent_positive",
+  "supportive_environment_percent_positive",
+  "economic_need_index"
+)
+
+titles <- c(
+  "Histogram of Teacher Experience",
+  "Histogram of Chronically Absent",
+  "Histogram of Rigorous Instruction",
+  "Histogram of Supportive Environment",
+  "Histogram of Economic Need Index"
+)
+
+xlabels <- c(
+  "Teacher Experience (%)",
+  "Chronically Absent (%)",
+  "Rigorous Instruction (%)",
+  "Supportive Environment Rating",
+  "Economic Need Index",
+  "Graduation Rate (%)",
+  "College & Career Rate (%)"
+)
+
+colors <- c("lightyellow", "lightpink",
+  "lightblue", "lightgreen", "gold", "lavender", "tomato")
+
+for(i in seq_along(vars)) {
+  hist(cleaned_data[[vars[i]]],
+       main = titles[i],
+       xlab = xlabels[i],
+       ylab = "Count",
+       col  = colors[i],
+       cex.main = 0.8,
+       cex.lab  = 0.7)
+}
+
+```
+
+Across the numerical variables in the dataset, most distributions appear moderately skewed rather than perfectly symmetric. Teacher experience and supportive environment ratings are concentrated toward the higher end, suggesting that many schools report strong performance in these areas. Rigorous instruction also clusters toward higher percentages, though with slightly more spread. In contrast, the proportion of chronically absent students shows a roughly unimodal distribution centered around the mid-range, indicating moderate variability across schools. Economic need index is noticeably right-skewed, with a large share of schools showing high levels of economic need. Overall, the variables paint a picture of schools that generally perform well in instructional and environmental quality while simultaneously serving populations with substantial economic challenges and varying attendance outcomes.
+
+
+To address skewness in selected numerical variables, we applied log transformation to right-skewed predictors (e.g., economic need index and chronically absent) and then standardized all numerical variables prior to modeling. This reduces the influence of extreme values and places all predictors on a comparable scale, which is especially important when cross-validation is used.
+
+
+### Outcome Variables
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+par(mfrow = c(1,2)) 
+
+vars  <- c(
+  "mean_algebra2",
+  "mean_english"
+)
+
+titles <- c(
+  "Histogram of Algebra2 Mean",
+  "Histogram of English Mean"
+)
+
+xlabels <- c(
+  "Algebra2 Mean Score",
+  "English Mean Score"
+)
+
+colors <- c("orange", "lightgrey")
+
+for(i in seq_along(vars)) {
+  hist(cleaned_data[[vars[i]]],
+       main = titles[i],
+       xlab = xlabels[i],
+       ylab = "Count",
+       col  = colors[i],
+       cex.main = 0.8,
+       cex.lab  = 0.7)
+}
+```
+
+The two outcome variables, Algebra2 mean score and English mean score, both display approximately bell-shaped distributions centered around the mid-60s to low-70s. Although neither distribution is perfectly symmetric, both exhibit only mild skewness with no extreme outliers dominating the scale. Algebra2 scores range predominantly between 55 and 75, with fewer schools scoring below 50 or above 85, indicating moderate performance variation across the district. English scores show a slightly wider spread, extending from the mid-40s to above 90, suggesting greater variability in English proficiency across schools. Overall, the outcome variables appear well-distributed. But to improve the shape of the distribution and maintain consistency with the preprocessing of numerical predictors, we will also apply a log transformation to these outcome variables. 
+
+
+
+
+
+
+
+# Correlation Between Predictors
+
+```{r echo=FALSE, fig.width=10, fig.height=6, message=FALSE, warning=FALSE}
+# --- Correlation matrix + heatmap (numeric only; pairwise-complete) ---
+
+num_cols <- names(joint_data)[sapply(joint_data, is.numeric)]
+num_df <- joint_data[, num_cols, drop = FALSE]
+num_df <- num_df[, sapply(num_df, function(x) !all(is.na(x))), drop = FALSE]
+
+if (ncol(num_df) >= 2) {
+  cor_mat <- cor(num_df, use = "pairwise.complete.obs")
+  
+  cor_long <- as.data.frame(as.table(cor_mat))
+  names(cor_long) <- c("x", "y", "r")
+  
+  library(ggplot2)
+  
+  ggplot(cor_long, aes(x, y, fill = r)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = sprintf("%.2f", r)), 
+              color = "black", size = 4) +
+    scale_fill_gradient2(
+      low = "#5DADE2", mid = "white", high = "#EC7063",
+      midpoint = 0, limit = c(-1, 1), space = "Lab",
+      name = "Correlation"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+      axis.text.y = element_text(size = 12),
+      panel.grid = element_blank(),
+      axis.title = element_blank(),
+      plot.title = element_text(size = 18, face = "bold", hjust = 0.5),
+      legend.position = "right"
+    ) +
+    labs(title = "Correlation Heatmap (Numeric Variables)")
+}
+```
+
+The correlation analysis of the numeric variables reveals several meaningful relationships among school performance indicators. Algebra 2 and English mean scores are strongly and positively correlated, suggesting that schools performing well in one subject tend to perform well in the other. Economic need index shows a strong negative correlation with both outcome variables, indicating that higher economic need is associated with lower academic performance. Teacher experience, rigorous instruction, and supportive environment exhibit moderate positive correlations with the outcome variables, implying that more experienced teachers and more positive instructional environments are linked to higher student achievement. In contrast, the percentage of chronically absent students is moderately to strongly negatively associated with both academic performance and other school climate measures, suggesting that absenteeism may be a critical barrier to student success. Overall, the heatmap highlights two clusters: one reflecting positive school and instructional conditions associated with higher achievement, and another centered on economic disadvantage and absenteeism associated with lower performance.
+
+
+Based on the results of our exploratory analysis, we will proceed with a regularized linear regression model (Ridge/Elastic Net), because this approach handles multicollinearity among school-climate predictors and supports cross-validation for robust hyperparameter tuning. Skewed predictors will be log-transformed and all numerical variables standardized within CV folds to ensure fair scaling and prevent information leakage.
+
+```{r, echo=FALSE}
+# --- Outlier scan (|z| > 3) across numeric columns ---
+if (ncol(num_df) > 0) {
+  z_df <- as.data.frame(scale(num_df))
+  outlier_count <- sapply(z_df, function(x) sum(abs(x) > 3, na.rm = TRUE))
+  outlier_tbl <- tibble::tibble(variable = names(outlier_count),
+                                n_outliers = as.integer(outlier_count)) |>
+    dplyr::arrange(dplyr::desc(n_outliers))
+  print(head(outlier_tbl, 15))
+}
+```
+
+
+The outlier scan using the ∣z∣>3 criterion identified only a small number of extreme values across the numeric variables. The variables percent of teachers with 3 or more years of experience and economic need index contained the most outliers (two each), followed by rigorous instruction percent positive with one. All other variables—including mean algebra2, mean English, percent of students chronically absent, and supportive environment percent positive—contained no outliers, suggesting that extreme values are limited and unlikely to distort the modeling process.
+
+
+We decided not to remove or alter outliers because only a very small number were detected across the numerical variables, and removing observations could risk losing meaningful information. The presence of a few extreme values is unlikely to distort model performance, especially when using regularized regression with standardized predictors. However, as an alternative approach, we could also fit a robust regression model, which automatically down-weights extreme observations and reduces their influence on coefficient estimates without requiring manual outlier removal.
+
+
+
+
+# 3. Baseline Model
+
+Our main hypothesis is that schools with higher levels of economic disadvantage and higher rates of chronic absenteeism will have lower average Regents exam scores. 
+To test this hypothesis, we specify a simple baseline model for each outcome (Algebra II and English) that includes only the two key disadvantage indicators:
+the economic need index and the percent of students who are chronically absent.
+These baseline models provide a clear starting point before adding additional school climate and teacher characteristics in expanded models.
+
+## Model Specification
+
+Let $i$ index high schools. 
+We define the baseline model for the 2018 Algebra II Regents scores as:
+\[
+\text{mean\_algebra2}_{i}
+= \beta_{0}
++ \beta_{1}\,\text{economic\_need\_index}_{i}
++ \beta_{2}\,\text{percent\_of\_students\_chronically\_absent}_{i}
++ \varepsilon_{i}.
+\]
+
+Similarly, the baseline model for the 2018 English Regents scores is:
+\[
+\text{mean\_english}_{i}
+= \beta_{0}
++ \beta_{1}\,\text{economic\_need\_index}_{i}
++ \beta_{2}\,\text{percent\_of\_students\_chronically\_absent}_{i}
++ \varepsilon_{i}.
+\]
+
+These baseline models directly test our main hypothesis while remaining simple and interpretable. 
+In later sections, we will extend them by adding teacher experience, rigorous instruction, and supportive environment as additional predictors.
+
+```{r}
+# Baseline model for Algebra II
+baseline_alg <- lm(
+  mean_algebra2 ~ economic_need_index +
+                   percent_of_students_chronically_absent,
+  data = cleaned_data
+)
+
+# Baseline model for English
+baseline_eng <- lm(
+  mean_english ~ economic_need_index +
+                  percent_of_students_chronically_absent,
+  data = cleaned_data
+)
+
+# Summaries of the baseline models
+summary(baseline_alg)
+summary(baseline_eng)
+```
+
+## Interpretation of Baseline Model
+
+Across both baseline models, economic need and chronic absenteeism are strong and statistically significant predictors of Regents performance. For Algebra~II, higher economic need is associated with lower average scores ($\hat{\beta}=-10.92$, $p<0.01$), and chronic absenteeism exhibits an even larger negative association ($\hat{\beta}=-35.85$, $p<0.001$). Similarly, in the English model, both predictors remain strongly negative, with economic need showing an especially large effect ($\hat{\beta}=-30.93$, $p<0.001$) and chronic absenteeism also substantially decreasing scores ($\hat{\beta}=-29.12$, $p<0.001$). These results indicate that schools serving higher-need communities and those with higher absenteeism tend to perform markedly worse on both Regents exams. The baseline models explain a meaningful proportion of score variation (adjusted $R^{2}=0.48$ for Algebra~II and $0.68$ for English), providing clear initial support for our hypothesis that school disadvantage is negatively associated with academic performance.
+
+
