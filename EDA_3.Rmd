@@ -142,6 +142,21 @@ cleaned_data <- joint_data |>
 #colSums(is.na(cleaned_data))
 ```
 
+```{r}
+### Split to train and test set
+cleaned_data <- cleaned_data |> 
+  dplyr::rename(
+    dbn = school_dbn,
+    alg2_mean = mean_algebra2,
+    eng_mean = mean_english,
+    school = school_name,
+    teacher_exp = percent_of_teachers_with_3_or_more_years_of_experience,
+    absent_rate = percent_of_students_chronically_absent,
+    rigor_pos = rigorous_instruction_percent_positive,
+    support_pos = supportive_environment_percent_positive,
+    need_index = economic_need_index
+  )
+```
 
 
 
@@ -153,11 +168,11 @@ cleaned_data <- joint_data |>
 par(mfrow = c(2, 3))
 
 vars  <- c(
-  "percent_of_teachers_with_3_or_more_years_of_experience",
-  "percent_of_students_chronically_absent",
-  "rigorous_instruction_percent_positive",
-  "supportive_environment_percent_positive",
-  "economic_need_index"
+  "teacher_exp",
+  "absent_rate",
+  "rigor_pos",
+  "support_pos",
+  "need_index"
 )
 
 titles <- c(
@@ -204,8 +219,8 @@ To address skewness in selected numerical variables, we applied log transformati
 par(mfrow = c(1,2)) 
 
 vars  <- c(
-  "mean_algebra2",
-  "mean_english"
+  "alg2_mean",
+  "eng_mean"
 )
 
 titles <- c(
@@ -336,17 +351,29 @@ These baseline models directly test our main hypothesis while remaining simple a
 In later sections, we will extend them by adding teacher experience, rigorous instruction, and supportive environment as additional predictors.
 
 ```{r}
+library(tidyverse)
+library(broom)
+library(readr)
+library(dplyr)
+library(forcats)
+library(ggplot2)
+library(olsrr)
+library(glmnet)
+```
+
+
+```{r}
 # Baseline model for Algebra II
 baseline_alg <- lm(
-  mean_algebra2 ~ economic_need_index +
-                   percent_of_students_chronically_absent,
+  alg2_mean ~ need_index +
+                   absent_rate,
   data = cleaned_data
 )
 
 # Baseline model for English
 baseline_eng <- lm(
-  mean_english ~ economic_need_index +
-                  percent_of_students_chronically_absent,
+  eng_mean ~ need_index +
+                  absent_rate,
   data = cleaned_data
 )
 
@@ -359,4 +386,64 @@ summary(baseline_eng)
 
 Across both baseline models, economic need and chronic absenteeism are strong and statistically significant predictors of Regents performance. For Algebra~II, higher economic need is associated with lower average scores ($\hat{\beta}=-10.92$, $p<0.01$), and chronic absenteeism exhibits an even larger negative association ($\hat{\beta}=-35.85$, $p<0.001$). Similarly, in the English model, both predictors remain strongly negative, with economic need showing an especially large effect ($\hat{\beta}=-30.93$, $p<0.001$) and chronic absenteeism also substantially decreasing scores ($\hat{\beta}=-29.12$, $p<0.001$). These results indicate that schools serving higher-need communities and those with higher absenteeism tend to perform markedly worse on both Regents exams. The baseline models explain a meaningful proportion of score variation (adjusted $R^{2}=0.48$ for Algebra~II and $0.68$ for English), providing clear initial support for our hypothesis that school disadvantage is negatively associated with academic performance.
 
+
+```{r}
+# Full model: Algebra2
+full_model <- lm(alg2_mean ~ ( teacher_exp + absent_rate + rigor_pos + need_index)^2,
+                 data = cleaned_data)
+
+# best subset search
+best_subset <- ols_step_best_subset(full_model)
+best_subset
+
+# Choose the model with the lowest AIC
+best_row <- which.min(best_subset$metrics$aic)
+best_row
+
+best_predictors <- best_subset$metrics$predictors[[best_row]]
+best_predictors
+```
+
+
+```{r}
+Model_selected_algebra <- lm(
+  alg2_mean ~ teacher_exp + absent_rate + need_index + rigor_pos + teacher_exp:rigor_pos + absent_rate:need_index,
+  data = cleaned_data
+)
+summary(Model_selected_algebra)
+```
+
+
+```{r}
+# Full model: English
+full_model <- lm(eng_mean ~ ( teacher_exp + absent_rate + rigor_pos + need_index)^2,
+                 data = cleaned_data)
+
+# best subset search
+best_subset <- ols_step_best_subset(full_model)
+best_subset
+
+# Choose the model with the lowest AIC
+best_row <- which.min(best_subset$metrics$aic)
+best_row
+
+best_predictors <- best_subset$metrics$predictors[[best_row]]
+best_predictors
+```
+
+```{r}
+Model_selected_eng <- lm(
+  alg2_mean ~ rigor_pos + absent_rate:rigor_pos + rigor_pos:need_index,
+  data = cleaned_data
+)
+summary(Model_selected_eng)
+```
+
+```{r}
+Model_selected_eng_with_hiera <- lm(
+  alg2_mean ~ absent_rate + rigor_pos + need_index + absent_rate:rigor_pos + rigor_pos:need_index,
+  data = cleaned_data
+)
+summary(Model_selected_eng)
+```
 
